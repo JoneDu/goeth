@@ -9,6 +9,7 @@ import (
 type Config struct {
 	INFURA_PK string
 	Ak1       string
+	APk2      string
 	Ak2       string
 }
 
@@ -21,6 +22,7 @@ func LoadConfig() Config {
 		INFURA_PK: getEnv("INFURA_PK", ""),
 		Ak1:       getEnv("Ak1", ""),
 		Ak2:       getEnv("Ak2", ""),
+		APk2:      getEnv("APk2", ""),
 	}
 }
 
