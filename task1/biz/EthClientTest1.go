@@ -3,7 +3,10 @@ package biz
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"github.com/Bruce/goeth/task1/config"
+	"github.com/Bruce/goeth/task1/contract"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -106,4 +109,124 @@ func TransferEth() {
 	}
 	log.Println("tx sent: ", signedTx.Hash().Hex())
 
+}
+
+func GoCounterGet() {
+	c := config.LoadConfig()
+	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + c.INFURA_PK)
+	if err != nil {
+		log.Fatal(err)
+	}
+	//defer client.Close()
+	// New Contract
+	counterContract, err := contract.NewContract(common.HexToAddress("0x9Dd442BD234c3085525ba0EAd55162528FCa06eD"), client)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// call get method
+	count, err := counterContract.Get(nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("count: ", count)
+}
+
+func GoCounterInc() {
+	c := config.LoadConfig()
+	client, err := ethclient.Dial("https://sepolia.infura.io/v3/" + c.INFURA_PK)
+	if err != nil {
+		log.Fatal(err)
+	}
+	//defer client.Close()
+
+	//privateKey
+	privateKey, err := crypto.HexToECDSA(c.Ak1)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// get from address
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		log.Fatal("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
+	}
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	// get nonce
+	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
+	if err != nil {
+		log.Fatal(err)
+	}
+	gasLimit := uint64(30000)
+	gasPrice, err := client.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	//get chanid
+	chainID, err := client.NetworkID(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	// create transaction
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, chainID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = big.NewInt(0)
+	auth.GasLimit = gasLimit
+	auth.GasPrice = gasPrice
+
+	// contract address
+	counterContract, err := contract.NewContract(common.HexToAddress("0x9Dd442BD234c3085525ba0EAd55162528FCa06eD"), client)
+	if err != nil {
+		log.Fatal(err)
+	}
+	tx, err := counterContract.Inc(auth)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("tx sent: ", tx.Hash().Hex())
+
+	// wait for transaction to be mined
+	receipt, err := bind.WaitMined(context.Background(), client, tx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("tx mined: ", receipt.Status)
+	fmt.Println("tx gas used: ", receipt.GasUsed)
+	fmt.Println("tx confirmed in block: ", receipt.BlockNumber.String())
+}
+func SubIncrementEvents() {
+	c := config.LoadConfig()
+	client, err := ethclient.Dial("wss://sepolia.infura.io/ws/v3/" + c.INFURA_PK)
+	if err != nil {
+		log.Fatal(err)
+	}
+	counterContract, err := contract.NewContract(common.HexToAddress("0x9Dd442BD234c3085525ba0EAd55162528FCa06eD"), client)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// create watch options
+	watchOpts := &bind.WatchOpts{Context: context.Background()}
+	// create event channel
+	eventChan := make(chan *contract.ContractIncrement)
+	sub, err := counterContract.WatchIncrement(watchOpts, eventChan)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer sub.Unsubscribe()
+	log.Println("Waiting for events...")
+	for {
+		select {
+		case event := <-eventChan:
+			log.Println("Event Count:", event.Count)
+			log.Println("Event block num:", event.Raw.BlockNumber)
+			log.Println("Event tx hash:", event.Raw.TxHash.Hex())
+			log.Printf("  Block Hash: %s", event.Raw.BlockHash.Hex())
+		case err := <-sub.Err():
+			log.Println("Error:", err)
+			return
+		}
+	}
 }
